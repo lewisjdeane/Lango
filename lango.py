@@ -7,14 +7,19 @@ lines = []
 mode  = "LTF"
 name = ""
 path = ""
+target = 5
 
 
 def main():
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+
     print_intro_message()
     print_paths()
     load_path()
     load_file()
     load_mode()
+    load_target()
     main_loop()
 
 
@@ -37,6 +42,25 @@ def print_paths():
               [""]
 
         print("\n".join(out))
+
+
+def load_target():
+    global target
+
+    config = configparser.ConfigParser()
+    config.read("config.ini")
+
+    try:
+        section = config["GENERAL"]
+        t = section["Target"]
+        target = int(t)
+    except KeyError:
+        section = config["GENERAL"]
+        section["Target"] = str(5)
+        target = 5
+
+    with open('config.ini', 'w') as configfile:
+        config.write(configfile)
 
 
 def load_path():
@@ -76,12 +100,15 @@ def load_path():
 
 def main_loop():
     (x, y)  = get_word()
-    message = input("\nQ: %s\nA: " % x)
-    parse(message, y)
+    (x1, y1) = modify(x, y)
+    message = input("\nQ: %s\nA: " % x1)
+    parse(message, y1, x)
     main_loop()
 
 
-def parse(message, answer):
+def parse(message, answer, x):
+    global target
+
     if message == "lango exit":
         exit()
     elif message == "lango reload":
@@ -89,6 +116,14 @@ def parse(message, answer):
         print("INFO: File has been reloaded.")
     elif message == "lango paths":
         print_paths()
+    elif message == "lango set target":
+        print("")
+        t = int(input("| Target: "))
+
+        if t > 0:
+            set_target(t)
+        else:
+            print("\nERROR: Invalid target, target remains what it was.")
     elif message == "lango set mode":
         print("")
         mode = input("| Mode: ")
@@ -106,7 +141,7 @@ def parse(message, answer):
 
         try:
             config = configparser.ConfigParser()
-            config.read('config.ini')
+            config.read('names.ini')
             p = config[n.upper()]['Path']
         except KeyError:
             print("\nERROR: Invalid path name, path remains what it was.")
@@ -138,14 +173,16 @@ def parse(message, answer):
              "",
              "> Valid Commands",
              "  --------------",
-             "  lango exit      -> Exits the program.",
-             "  lango help      -> Launch this help screen.",
-             "  lango reload    -> Reload the current path.",
-             "  lango paths     -> List all names and paths.",
-             "  lango add path  -> Add a new path.",
-             "  lango load path -> Load a new path.",
-             "  lango set mode  -> Set the current mode.",
-             "  lango get mode  -> Return the current mode.",
+             "  lango exit       -> Exits the program.",
+             "  lango help       -> Launch this help screen.",
+             "  lango reload     -> Reload the current path.",
+             "  lango paths      -> List all names and paths.",
+             "  lango add path   -> Add a new path.",
+             "  lango load path  -> Load a new path.",
+             "  lango set mode   -> Set the current mode.",
+             "  lango get mode   -> Return the current mode.",
+             "  lango set target -> Set the current target.",
+             "  lango get target -> Return the current target.",
              "",
              "> Valid Modes",
              "  -----------",
@@ -178,10 +215,77 @@ def parse(message, answer):
         config = configparser.ConfigParser()
         config.read('config.ini')
         print("INFO: Current mode is '%s'.\n" % (config['GENERAL']['Mode']))
+    elif message == "lango get target":
+        config = configparser.ConfigParser()
+        config.read('config.ini')
+        print("INFO: Current target is '%s'.\n" % (config['GENERAL']['Target']))
     elif message.lower() == answer.lower():
-        print(">  Correct!")
+        score = update_word_stats(x, True)
+        print(">  Correct! [%d/%d]" % (score, target))
+
+        if score == target:
+            remove_word(x)
     else:
-        print(">  Incorrect, correct answer was '%s'." % (answer))
+        score = update_word_stats(x, False)
+        print(">  Incorrect, correct answer was '%s'. [%d/%d]" % (answer, score, target))
+
+
+def remove_word(word):
+    global lines
+
+    y = [line.rstrip('\n').rstrip('\r') for line in codecs.open(path, 'r', encoding='utf-8')]
+
+    sd = [x for x in y if not x.startswith(word + " = ")]
+    fd = [x for x in y if x.startswith(word + " = ")]
+
+    try:
+        k = sd.index("# Learnt")
+        p = sd[0:k]
+        z = p + ["# Learnt"] + fd + y[k+2:]
+    except ValueError:
+        z = sd + ["# Learnt"] + fd
+
+    f = codecs.open(path, "w", "utf-8")
+    f.write("\n".join(z))
+    f.close()
+
+    load_file()
+
+
+def update_word_stats(word, correct):
+    global name
+    config = configparser.ConfigParser()
+    config.read(name.lower() + ".ini")
+
+    try:
+        section = config['WORDS']
+        try:
+            x = int(section[word])
+            if correct:
+                x += 1
+            else:
+                x -= 1
+            score = max(x, 0)
+            section[word] = str(score)
+        except KeyError:
+            if correct:
+                score = 1
+            else:
+                score = 0
+            section[word] = str(score)
+    except KeyError:
+        config['WORDS'] = {}
+        section = config['WORDS']
+        if correct:
+            score = 1
+        else:
+            score = 0
+        section[word] = str(score)
+
+    with open(name.lower() + ".ini", 'w') as configfile:
+        config.write(configfile)
+
+    return score
 
 
 def name_already_taken(n):
@@ -211,7 +315,13 @@ def load_file():
 
     y = [line.rstrip('\n') for line in codecs.open(path, 'r', encoding='utf-8')]
 
-    lines = [seperate(x) for x in y if " = " in x]
+    try:
+        k = y.index("# Learnt")
+        z = y[:k]
+    except ValueError:
+        z = y
+
+    lines = [seperate(x) for x in z if " = " in x]
 
     print("INFO: File loaded successfully.")
 
@@ -246,6 +356,28 @@ def set_path(path, name):
 
     with open('config.ini', 'w') as configfile:
         config.write(configfile)
+
+
+def set_target(t):
+    global target
+
+    target = t
+
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+
+    try:
+        general = config['GENERAL']
+    except KeyError:
+        config['GENERAL'] = {}
+        general = config['GENERAL']
+
+    general['Target'] = str(t)
+
+    with open('config.ini', 'w') as configfile:
+        config.write(configfile)
+
+    print("INFO: Set target to %d\n" % (t))
 
 
 def set_mode(mode1):
@@ -286,7 +418,7 @@ def load_mode():
         mode = config['GENERAL']['Mode']
     except KeyError:
         mode = input("INFO: No mode set, please enter a valid mode " \
-                   + "(MIX, F2L or L2F): ")
+                   + "(MIX, N2L or L2N): ")
         if is_valid_mode(mode):
             set_mode(mode)
         else:
@@ -306,16 +438,22 @@ def get_word():
         return ("No words found in file, exit or choose a new filepath.",
                 "No words found in file, exit or choose a new filepath.")
     
-    if mode == "L2N":
-        index = 0
-    elif mode == "N2L":
-        index = 1
-    else:
-        index = random.randint(0, 1)
-
     line = lines[rand]
 
-    return (line[index], line[index ^ 1])
+    return (line[0], line[1])
+
+def modify(x, y):
+    if mode == "L2N":
+        return (x, y)
+    elif mode == "N2L":
+        return (y, x)
+    else:
+        index = random.randint(0, 1)
+        if index == 0:
+            return (x, y)
+        else:
+            return (y, x)
+
 
 
 def print_intro_message():
